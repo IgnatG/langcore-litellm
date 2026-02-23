@@ -2,6 +2,14 @@
 
 <!-- version list -->
 
+## v1.0.2 (2026-02-23)
+
+### Bug Fixes
+
+- Update Python version in CI and refine langcore dependency in project files
+  ([`a361342`](https://github.com/IgnatG/langcore-litellm/commit/a361342a8002ef11590f101943f74cb49d5ecad9))
+
+
 ## v1.0.1 (2026-02-23)
 
 ### Bug Fixes
