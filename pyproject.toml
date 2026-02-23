@@ -1,0 +1,33 @@
+[build-system]
+requires = ["setuptools>=82.0.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "langcore-litellm"
+version = "0.2.0"
+description = "LangCore provider plugin for LiteLLM"
+readme = "README.md"
+requires-python = ">=3.12"
+license = "Apache-2.0"
+dependencies = [
+    "langcore>=1.0.0",
+    "litellm>=1.81.13",
+]
+
+[project.entry-points."langcore.providers"]
+litellm = "langcore_litellm.provider:LiteLLMLanguageModel"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["langcore_litellm*"]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.23",
+    "ruff>=0.8.0",
+]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
