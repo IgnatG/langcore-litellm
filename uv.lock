@@ -962,7 +962,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "langcore", specifier = ">=1.0.0" },
+    { name = "langcore" },
     { name = "litellm", specifier = ">=1.81.13" },
 ]
 
