@@ -1,18 +1,38 @@
-# LangCore LiteLLM Provider
+# LangCore LiteLLM
 
-A provider plugin for [LangCore](https://github.com/google/langcore) that supports 100+ LLM models through [LiteLLM](https://docs.litellm.ai/docs/#basic-usage)'s unified API, including OpenAI GPT models, Anthropic Claude, Google PaLM, Azure OpenAI, and many open-source models.
+> Provider plugin for [LangCore](https://github.com/ignatg/langcore) — access 100+ language models through a single, unified interface via [LiteLLM](https://docs.litellm.ai/docs/).
 
-> **Note**: This is a third-party provider plugin for LangCore. For the main LangCore library, visit [google/langcore](https://github.com/google/langcore).
+[![PyPI version](https://img.shields.io/pypi/v/langcore-litellm)](https://pypi.org/project/langcore-litellm/)
+[![Python](https://img.shields.io/pypi/pyversions/langcore-litellm)](https://pypi.org/project/langcore-litellm/)
+[![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
+
+---
+
+## Overview
+
+**langcore-litellm** is a provider plugin for [LangCore](https://github.com/ignatg/langcore) that adds support for 100+ language models through [LiteLLM](https://docs.litellm.ai/docs/)'s unified API. Install it, prefix your model ID with `litellm/`, and every LangCore extraction call routes through LiteLLM transparently — auto-discovered via Python entry points.
+
+---
+
+## Features
+
+- **100+ model support** — OpenAI, Anthropic, Google, Azure, Mistral, Groq, Cohere, HuggingFace, Ollama, vLLM, and more through a single provider
+- **Native async** — uses `litellm.acompletion()` with `asyncio.Semaphore` for true non-blocking concurrent I/O (no thread pool overhead)
+- **Multi-pass cache bypass** — automatic per-pass cache control ensures fresh LLM responses on repeat extraction passes while keeping the first pass cacheable
+- **Token usage tracking** — captures prompt, completion, and total token counts (`UsageStats`) from every inference call
+- **Concurrency control** — configurable `max_workers` semaphore limits parallel async requests to prevent rate-limit errors
+- **Zero-config plugin** — auto-registered via Python entry points; no manual wiring required
+- **Full parameter passthrough** — forward any LiteLLM-supported parameter (temperature, top_p, timeout, etc.) through `provider_kwargs`
+
+---
 
 ## Installation
-
-Install from PyPI:
 
 ```bash
 pip install langcore-litellm
 ```
 
-Or install from source for development:
+Or install from source:
 
 ```bash
 git clone https://github.com/JustStas/langcore-litellm
@@ -20,162 +40,108 @@ cd langcore-litellm
 pip install -e .
 ```
 
-## Supported Models
+---
 
-This provider handles model IDs that start with `litellm` and supports a wide range of models through LiteLLM's unified API:
+## Quick Start
 
-- **OpenAI models**: `litellm/gpt-4`, `litellm/gpt-4o`, `litellm/gpt-3.5-turbo`, etc.
-- **Anthropic models**: `litellm/claude-3-opus`, `litellm/claude-3-sonnet`, `litellm/claude-3-haiku`, etc.
-- **Google models**: `litellm/gemini-1.5-pro`, `litellm/palm-2`, etc.
-- **Azure OpenAI**: `litellm/azure/your-deployment-name`
-- **Open-source models**: `litellm/llama-2-7b-chat`, `litellm/mistral-7b`, `litellm/codellama-34b`, etc.
-- **And many more**: See [LiteLLM's supported models](https://docs.litellm.ai/docs/providers)
+### Integration with LangCore
 
-**Note**: All model IDs must be prefixed with `litellm/` or `litellm-` to be handled by this provider.
+langcore-litellm integrates with LangCore through the **provider plugin system**. Create a model configuration, and LangCore handles the rest:
 
-## Environment Variables
+```python
+import langcore as lx
 
-Configure authentication using LiteLLM's standard environment variable format. Set the appropriate variables based on your provider:
+# Configure the LiteLLM provider
+config = lx.factory.ModelConfig(
+    model_id="litellm/gpt-4o",
+    provider="LiteLLMLanguageModel",
+)
+model = lx.factory.create_model(config)
 
-### OpenAI
+# Use with any LangCore extraction
+result = lx.extract(
+    text_or_documents="Acme Corp agrees to pay $50,000 to Beta LLC by March 2025.",
+    model=model,
+    prompt_description="Extract parties, monetary amounts, and dates.",
+    examples=[
+        lx.data.ExampleData(
+            text="Alpha Inc will pay $10,000 to Omega Ltd by January 2024.",
+            extractions=[
+                lx.data.Extraction("party", "Alpha Inc", attributes={"role": "payer"}),
+                lx.data.Extraction("party", "Omega Ltd", attributes={"role": "payee"}),
+                lx.data.Extraction("monetary_amount", "$10,000"),
+                lx.data.Extraction("date", "January 2024", attributes={"type": "deadline"}),
+            ],
+        )
+    ],
+)
 
-```bash
-export OPENAI_API_KEY="your-api-key"
+print(result)
 ```
 
-### Anthropic
-
-```bash
-export ANTHROPIC_API_KEY="your-api-key"
-```
-
-### HuggingFace
-
-```bash
-export HUGGINGFACE_API_KEY="your-api-key"
-```
-
-### Azure OpenAI
-
-```bash
-export AZURE_API_KEY="your-azure-key"
-export AZURE_API_BASE="https://your-resource.openai.azure.com/"
-export AZURE_API_VERSION="2024-02-01"
-```
-
-### Google (VertexAI)
-
-```bash
-export VERTEXAI_PROJECT="your-project-id"
-export VERTEXAI_LOCATION="us-central1"
-# Also run: gcloud auth application-default login
-```
-
-### Other Providers
-
-See the [LiteLLM documentation](https://docs.litellm.ai/docs/#basic-usage) for environment variables for other providers like HuggingFace, Cohere, AI21, etc.
+---
 
 ## Usage
 
-### Basic Usage
+### Supported Models
 
-```python
-import langcore as lx
+Model IDs must be prefixed with `litellm/` (or `litellm-`) to route through this provider:
 
-# Create model configuration
-config = lx.factory.ModelConfig(
-    model_id="litellm/azure/gpt-4o",  # or "gpt-4", "claude-3-sonnet", etc.
-    provider="LiteLLMLanguageModel",
-    provider_kwargs={},  # pass provider-specific kwargs here (e.g. {"api_key": "..."})
-)
-model = lx.factory.create_model(config)
+| Provider | Example Model IDs |
+|----------|-------------------|
+| **OpenAI** | `litellm/gpt-4o`, `litellm/gpt-4o-mini`, `litellm/gpt-4-turbo` |
+| **Anthropic** | `litellm/claude-3-opus`, `litellm/claude-3.5-sonnet`, `litellm/claude-3-haiku` |
+| **Google** | `litellm/gemini-2.5-pro`, `litellm/gemini-2.0-flash` |
+| **Azure OpenAI** | `litellm/azure/your-deployment-name` |
+| **Mistral** | `litellm/mistral-large-latest` |
+| **Groq** | `litellm/groq/llama-3.1-70b` |
+| **Ollama** | `litellm/ollama/llama3.1` |
+| **And 100+ more** | See [LiteLLM providers](https://docs.litellm.ai/docs/providers) |
 
-# Extract entities
-result = lx.extract(
-    text_or_documents="Lady Juliet gazed longingly at the stars, her heart aching for Romeo",
-    model=model,
-    prompt_description="Extract characters, emotions, and relationships in order of appearance.",
-    examples=[...]
-)
+### Environment Variables
+
+Set the appropriate API key for your provider:
+
+```bash
+# OpenAI
+export OPENAI_API_KEY="sk-..."
+
+# Anthropic
+export ANTHROPIC_API_KEY="sk-ant-..."
+
+# Google (Gemini)
+export GEMINI_API_KEY="..."
+
+# Azure OpenAI
+export AZURE_API_KEY="..."
+export AZURE_API_BASE="https://your-resource.openai.azure.com/"
+export AZURE_API_VERSION="2024-02-01"
+
+# Ollama (local)
+export OLLAMA_API_BASE="http://localhost:11434"
 ```
 
-### Complete Example with Examples
+See the [LiteLLM documentation](https://docs.litellm.ai/docs/) for the full list of provider-specific variables.
 
-```python
-import langcore as lx
-import textwrap
+### Async Extraction
 
-# Define extraction prompt
-prompt = textwrap.dedent("""\
-    Extract characters, emotions, and relationships in order of appearance.
-    Use exact text for extractions. Do not paraphrase or overlap entities.
-    Provide meaningful attributes for each entity to add context.""")
-
-# Provide high-quality examples to guide the model
-examples = [
-    lx.data.ExampleData(
-        text="ROMEO. But soft! What light through yonder window breaks? It is the east, and Juliet is the sun.",
-        extractions=[
-            lx.data.Extraction(
-                extraction_class="character",
-                extraction_text="ROMEO",
-                attributes={"emotional_state": "wonder"}
-            ),
-            lx.data.Extraction(
-                extraction_class="emotion",
-                extraction_text="But soft!",
-                attributes={"feeling": "gentle awe"}
-            ),
-            lx.data.Extraction(
-                extraction_class="relationship",
-                extraction_text="Juliet is the sun",
-                attributes={"type": "metaphor"}
-            ),
-        ]
-    )
-]
-
-# Create model configuration
-config = lx.factory.ModelConfig(
-    model_id="litellm/azure/gpt-4o",
-    provider="LiteLLMLanguageModel",
-    provider_kwargs={},  # pass provider-specific kwargs here (e.g. {"api_key": "..."})
-)
-model = lx.factory.create_model(config)
-
-# Extract entities
-result = lx.extract(
-    text_or_documents="Lady Juliet gazed longingly at the stars, her heart aching for Romeo",
-    model=model,
-    prompt_description=prompt,
-    examples=examples
-)
-
-print("✅ Extraction successful!")
-print(f"Results: {result}")
-```
-
-### Async Usage
-
-The LiteLLM provider supports native async inference via `litellm.acompletion`,
-which avoids thread overhead and enables true concurrent I/O:
+The provider uses `litellm.acompletion()` for native async, avoiding thread overhead:
 
 ```python
 import asyncio
 import langcore as lx
 
 config = lx.factory.ModelConfig(
-    model_id="litellm/azure/gpt-4o",
+    model_id="litellm/gpt-4o",
     provider="LiteLLMLanguageModel",
-    provider_kwargs={},
 )
 model = lx.factory.create_model(config)
 
 async def main():
     result = await lx.async_extract(
-        text_or_documents="Lady Juliet gazed longingly at the stars...",
+        text_or_documents="Agreement between Acme Corp and Beta LLC...",
         model=model,
-        prompt_description="Extract characters and emotions.",
+        prompt_description="Extract parties and obligations.",
         examples=[...],
     )
     print(result)
@@ -183,148 +149,153 @@ async def main():
 asyncio.run(main())
 ```
 
-When using `async_extract`, the LiteLLM provider:
+### Multi-Pass Extraction
 
-- Uses `asyncio.Semaphore` instead of `ThreadPoolExecutor` for concurrency control
-- Calls `litellm.acompletion()` for non-blocking HTTP requests
-- Pipelines inference with alignment for improved throughput
+When running multiple extraction passes (`extraction_passes > 1`), the provider automatically manages cache behaviour:
 
-### Multi-Pass Cache Bypass
+| Pass | Cache Behaviour |
+|------|-----------------|
+| 1st pass | Normal — may be served from cache |
+| 2nd pass | Bypass — forces a fresh LLM response |
+| 3rd+ passes | Bypass — forces a fresh LLM response |
 
-When LangCore runs multiple extraction passes (`extraction_passes > 1`), the
-first pass is cacheable by LiteLLM's Redis cache, but subsequent passes
-automatically bypass the cache. This ensures that each additional pass produces a
-fresh LLM response — which is the entire point of multi-pass extraction for
-improved recall.
-
-The mechanism is fully automatic: LangCore threads a `pass_num` keyword
-argument through to the provider. When `pass_num >= 1`, the LiteLLM provider
-injects `cache={"no-cache": True}` into the `litellm.completion()` /
-`litellm.acompletion()` call, telling LiteLLM's cache layer to skip the lookup
-and force a live API call.
-
-| Pass | `pass_num` value | Cache behaviour |
-|------|------------------|-----------------|
-| 1    | `0`              | Normal — may be served from cache |
-| 2    | `1`              | Bypass — always calls the LLM |
-| 3+   | `2+`             | Bypass — always calls the LLM |
-
-> **Note:** `pass_num` is consumed internally by the provider and is never
-> forwarded to LiteLLM. You do not need to set it manually — LangCore
-> passes it automatically during multi-pass extraction.
-
-### Model ID Formats
-
-The model ID must start with `litellm/` or `litellm-` to be handled by this provider.
+This is fully automatic. LangCore threads a `pass_num` argument to the provider, which injects `cache={"no-cache": True}` for passes ≥ 1:
 
 ```python
-# Explicit LiteLLM prefix
-model_id = "litellm/azure/gpt-4o"
-model_id = "litellm/gpt-4"
-model_id = "litellm/claude-3-sonnet"
-
-# Alternative prefix formats
-model_id = "litellm-gpt-4o"
-model_id = "litellm-claude-3-sonnet"
+result = lx.extract(
+    text_or_documents="Contract text...",
+    model=model,
+    prompt_description="Extract all entities.",
+    examples=[...],
+    extraction_passes=3,  # 3 passes, only the first is cacheable
+)
 ```
 
 ### Advanced Configuration
 
-Pass additional parameters supported by LiteLLM using `provider_kwargs`. This is the correct way to supply model-specific settings (API keys, temperature, etc.) to LangCore:
+Forward any LiteLLM parameter through `provider_kwargs`:
 
 ```python
 config = lx.factory.ModelConfig(
-    model_id="litellm/gpt-4",
+    model_id="litellm/gpt-4o",
     provider="LiteLLMLanguageModel",
     provider_kwargs={
-        "temperature": 0.7,
-        "max_tokens": 1000,
+        "temperature": 0.2,
+        "max_tokens": 2000,
         "top_p": 0.9,
-        "frequency_penalty": 0.1,
-        "presence_penalty": 0.1,
-        "timeout": 30,
+        "timeout": 60,
+        "api_key": "sk-...",  # override env var
     },
 )
 model = lx.factory.create_model(config)
 ```
 
-#### Internal / Reserved Parameters
+#### Reserved Parameters
 
-The following keyword arguments are consumed internally by the provider and are
-**never forwarded** to `litellm.completion()` / `litellm.acompletion()`:
+These parameters are consumed internally and are not forwarded to LiteLLM:
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
 | `max_workers` | `int` | `10` | Maximum concurrent async requests (semaphore size) |
-| `pass_num` | `int` | `0` | Current extraction pass (0-indexed). Set automatically by LangCore during multi-pass extraction. When ≥ 1, the provider injects `cache={"no-cache": True}` so that repeat passes always get fresh LLM responses. |
+| `pass_num` | `int` | `0` | Current extraction pass index — set automatically by LangCore during multi-pass extraction |
 
-To supply an API key directly instead of via an environment variable:
+---
+
+## Composing with Other Plugins
+
+langcore-litellm serves as the base provider that other LangCore plugins wrap. Stack decorators to add audit logging, output validation, or hybrid rule-based extraction:
 
 ```python
+import langcore as lx
+from langcore_audit import AuditLanguageModel, LoggingSink
+from langcore_guardrails import GuardrailLanguageModel, SchemaValidator, OnFailAction
+
+# Base LLM provider
 config = lx.factory.ModelConfig(
-    model_id="litellm/gpt-4",
+    model_id="litellm/gpt-4o",
     provider="LiteLLMLanguageModel",
-    provider_kwargs={
-        "api_key": "sk-...",
-    },
 )
-model = lx.factory.create_model(config)
+llm = lx.factory.create_model(config)
+
+# Add output validation
+guarded = GuardrailLanguageModel(
+    model_id="guardrails/gpt-4o",
+    inner=llm,
+    validators=[SchemaValidator(MySchema, on_fail=OnFailAction.REASK)],
+    max_retries=3,
+)
+
+# Add audit logging
+audited = AuditLanguageModel(
+    model_id="audit/gpt-4o",
+    inner=guarded,
+    sinks=[LoggingSink()],
+)
+
+# Use the full stack with LangCore
+result = lx.extract(
+    text_or_documents="Contract text...",
+    model=audited,
+    prompt_description="Extract entities.",
+    examples=[...],
+)
 ```
 
-## Expected Output
+---
 
-The extraction will return structured data with precise character intervals:
+## Output Format
+
+Extractions return LangCore's standard `AnnotatedDocument` with precise character intervals:
 
 ```python
 AnnotatedDocument(
     extractions=[
         Extraction(
-            extraction_class='character',
-            extraction_text='Lady Juliet',
-            char_interval=CharInterval(start_pos=0, end_pos=11),
+            extraction_class='party',
+            extraction_text='Acme Corp',
+            char_interval=CharInterval(start_pos=0, end_pos=9),
             alignment_status=<AlignmentStatus.MATCH_EXACT: 'match_exact'>,
-            attributes={'emotional_state': 'longing'}
+            attributes={'role': 'payer'}
         ),
         Extraction(
-            extraction_class='emotion',
-            extraction_text='aching',
-            char_interval=CharInterval(start_pos=52, end_pos=58),
-            alignment_status=<AlignmentStatus.MATCH_FUZZY: 'match_fuzzy'>,
-            attributes={'feeling': 'heartfelt yearning'}
-        ),
-        Extraction(
-            extraction_class='relationship',
-            extraction_text='her heart aching for Romeo',
-            char_interval=CharInterval(start_pos=42, end_pos=68),
+            extraction_class='monetary_amount',
+            extraction_text='$50,000',
+            char_interval=CharInterval(start_pos=24, end_pos=31),
             alignment_status=<AlignmentStatus.MATCH_EXACT: 'match_exact'>,
-            attributes={'type': 'romantic longing'}
-        )
+            attributes={}
+        ),
     ],
-    text='Lady Juliet gazed longingly at the stars, her heart aching for Romeo'
+    text='Acme Corp agrees to pay $50,000 to Beta LLC by March 2025.'
 )
 ```
 
+---
+
 ## Error Handling
 
-The provider includes robust error handling and will return error messages instead of raising exceptions:
+API failures are captured gracefully — no unhandled exceptions:
 
 ```python
-# If API call fails, you'll get:
 ScoredOutput(score=0.0, output="LiteLLM API error: [error details]")
 ```
 
+---
+
 ## Development
 
-1. Install in development mode: `pip install -e .`
-2. Run tests: `python test_plugin.py`
-3. Build package: `python -m build`
-4. Publish to PyPI: `twine upload dist/*`
+```bash
+pip install -e .            # Install in development mode
+python test_plugin.py       # Run tests
+python -m build             # Build package
+twine upload dist/*         # Publish to PyPI
+```
 
 ## Requirements
 
+- Python ≥ 3.12
 - `langcore`
-- `litellm`
+- `litellm` ≥ 1.81.13
 
 ## License
 
-Apache License 2.0
+Apache License 2.0 — see [LICENSE](LICENSE) for details.
