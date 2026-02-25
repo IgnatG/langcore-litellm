@@ -14,6 +14,11 @@ from langcore.core.types import ScoredOutput
 from litellm.exceptions import (
     APIConnectionError as LiteLLMConnectionError,
     APIError as LiteLLMAPIError,
+    AuthenticationError as LiteLLMAuthenticationError,
+    BadRequestError as LiteLLMBadRequestError,
+    NotFoundError as LiteLLMNotFoundError,
+    PermissionDeniedError as LiteLLMPermissionDeniedError,
+    RateLimitError as LiteLLMRateLimitError,
     Timeout as LiteLLMTimeout,
 )
 
@@ -278,12 +283,18 @@ class LiteLLMLanguageModel(BaseLanguageModel):
 
             except (
                 LiteLLMAPIError,
+                LiteLLMAuthenticationError,
+                LiteLLMBadRequestError,
                 LiteLLMConnectionError,
+                LiteLLMNotFoundError,
+                LiteLLMPermissionDeniedError,
+                LiteLLMRateLimitError,
                 LiteLLMTimeout,
             ) as e:
                 logger.warning(
-                    "LiteLLM API error for model %s: %s",
+                    "LiteLLM API error for model %s: %s: %s",
                     self.model_id,
+                    type(e).__name__,
                     e,
                 )
                 yield [ScoredOutput(score=0.0, output="LLM inference failed")]
@@ -348,12 +359,18 @@ class LiteLLMLanguageModel(BaseLanguageModel):
 
                 except (
                     LiteLLMAPIError,
+                    LiteLLMAuthenticationError,
+                    LiteLLMBadRequestError,
                     LiteLLMConnectionError,
+                    LiteLLMNotFoundError,
+                    LiteLLMPermissionDeniedError,
+                    LiteLLMRateLimitError,
                     LiteLLMTimeout,
                 ) as e:
                     logger.warning(
-                        "LiteLLM API error for model %s: %s",
+                        "LiteLLM API error for model %s: %s: %s",
                         self.model_id,
+                        type(e).__name__,
                         e,
                     )
                     return [

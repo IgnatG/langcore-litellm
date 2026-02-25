@@ -151,3 +151,98 @@ class TestAsyncInfer:
         provider = _make_provider(max_workers=7)
         assert provider._max_workers == 7
         assert "max_workers" not in provider.provider_kwargs
+
+
+class TestKnownErrorHandling:
+    """Known LiteLLM API errors should produce a clean warning, not a traceback."""
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "exc_path",
+        [
+            "litellm.exceptions.AuthenticationError",
+            "litellm.exceptions.RateLimitError",
+            "litellm.exceptions.BadRequestError",
+            "litellm.exceptions.NotFoundError",
+            "litellm.exceptions.PermissionDeniedError",
+        ],
+    )
+    async def test_async_known_errors_no_traceback(self, exc_path, caplog):
+        """Each known error type should be caught as a warning, not exception."""
+        import importlib
+
+        import httpx
+
+        module_path, cls_name = exc_path.rsplit(".", 1)
+        mod = importlib.import_module(module_path)
+        exc_cls = getattr(mod, cls_name)
+
+        provider = _make_provider()
+
+        # LiteLLM exceptions require specific constructor args;
+        # PermissionDeniedError also needs a ``response`` object.
+        ctor_kwargs = dict(
+            message="test error",
+            model="mistral/mistral-large-latest",
+            llm_provider="mistral",
+        )
+        if cls_name == "PermissionDeniedError":
+            fake_response = httpx.Response(
+                403,
+                request=httpx.Request("POST", "https://api.example.com/v1/chat"),
+            )
+            ctor_kwargs["response"] = fake_response
+        exc = exc_cls(**ctor_kwargs)
+
+        with mock.patch("litellm.acompletion", new_callable=mock.AsyncMock) as m:
+            m.side_effect = exc
+            import logging
+
+            with caplog.at_level(logging.WARNING, logger="langcore_litellm.provider"):
+                results = await provider.async_infer(["prompt1"])
+
+        # Should return graceful failure, not raise
+        assert len(results) == 1
+        assert results[0][0].score == 0.0
+        assert results[0][0].output == "LLM inference failed"
+
+        # Should log a WARNING, not an ERROR with traceback
+        warning_records = [r for r in caplog.records if r.levelno == logging.WARNING]
+        assert any(
+            cls_name in r.message for r in warning_records
+        ), f"Expected a WARNING log mentioning {cls_name}, got: {[r.message for r in caplog.records]}"
+
+    @pytest.mark.parametrize(
+        "exc_path",
+        [
+            "litellm.exceptions.AuthenticationError",
+            "litellm.exceptions.RateLimitError",
+            "litellm.exceptions.NotFoundError",
+        ],
+    )
+    def test_sync_known_errors_no_traceback(self, exc_path, caplog):
+        """Sync infer() should also catch known errors cleanly."""
+        import importlib
+        import logging
+
+        module_path, cls_name = exc_path.rsplit(".", 1)
+        mod = importlib.import_module(module_path)
+        exc_cls = getattr(mod, cls_name)
+
+        provider = _make_provider()
+        exc = exc_cls(
+            message="test error",
+            model="mistral/mistral-large-latest",
+            llm_provider="mistral",
+        )
+
+        with mock.patch("litellm.completion") as m:
+            m.side_effect = exc
+            with caplog.at_level(logging.WARNING, logger="langcore_litellm.provider"):
+                results = list(provider.infer(["prompt1"]))
+
+        assert len(results) == 1
+        assert results[0][0].score == 0.0
+
+        warning_records = [r for r in caplog.records if r.levelno == logging.WARNING]
+        assert any(cls_name in r.message for r in warning_records)
