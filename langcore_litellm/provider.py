@@ -3,6 +3,7 @@
 import asyncio
 import dataclasses
 import logging
+import time
 import threading
 from collections.abc import Iterator, Sequence
 from typing import Any
@@ -26,7 +27,21 @@ logger = logging.getLogger(__name__)
 
 # Keys consumed internally by the provider and must not be
 # forwarded to ``litellm.completion()`` / ``litellm.acompletion()``.
-_INTERNAL_KEYS: frozenset[str] = frozenset({"max_workers", "pass_num"})
+_INTERNAL_KEYS: frozenset[str] = frozenset(
+    {
+        "max_workers",
+        "pass_num",
+        "rate_limit_retries",
+        "rate_limit_base_delay",
+    }
+)
+
+# ── Rate-limit retry defaults ──────────────────────────────────────
+_RATE_LIMIT_MAX_RETRIES: int = 4
+"""Maximum number of retry attempts on a 429 / rate-limit error."""
+
+_RATE_LIMIT_BASE_DELAY: float = 2.0
+"""Base delay in seconds for exponential back-off (doubles each retry)."""
 
 
 @dataclasses.dataclass
@@ -91,6 +106,13 @@ class LiteLLMLanguageModel(BaseLanguageModel):
                 - max_workers (int): Maximum concurrent async
                     requests (default: 10). Consumed internally,
                     not forwarded to LiteLLM.
+                - rate_limit_retries (int): Maximum retry attempts
+                    on 429 / rate-limit errors (default: 4).
+                    Consumed internally.
+                - rate_limit_base_delay (float): Base delay in
+                    seconds for exponential back-off on rate limits
+                    (default: 2.0, doubles each attempt). Consumed
+                    internally.
         """
         super().__init__()
 
@@ -107,6 +129,14 @@ class LiteLLMLanguageModel(BaseLanguageModel):
         # Pop internal keys before storing provider kwargs so they
         # are never forwarded to ``litellm.completion()``.
         self._max_workers: int = kwargs.pop("max_workers", 10)
+        self._rate_limit_retries: int = kwargs.pop(
+            "rate_limit_retries",
+            _RATE_LIMIT_MAX_RETRIES,
+        )
+        self._rate_limit_base_delay: float = kwargs.pop(
+            "rate_limit_base_delay",
+            _RATE_LIMIT_BASE_DELAY,
+        )
         self.provider_kwargs = kwargs
 
         # Lazily initialised in ``_get_semaphore`` to avoid binding
@@ -273,11 +303,42 @@ class LiteLLMLanguageModel(BaseLanguageModel):
 
                 messages = [{"role": "user", "content": prompt}]
 
-                response = litellm.completion(
-                    model=self.model_id,
-                    messages=messages,
-                    **call_kwargs,
-                )
+                # ── Rate-limit retry with exponential back-off ──
+                last_exc: Exception | None = None
+                for attempt in range(self._rate_limit_retries + 1):
+                    try:
+                        response = litellm.completion(
+                            model=self.model_id,
+                            messages=messages,
+                            **call_kwargs,
+                        )
+                        last_exc = None
+                        break
+                    except LiteLLMRateLimitError as rate_err:
+                        last_exc = rate_err
+                        if attempt < self._rate_limit_retries:
+                            delay = self._rate_limit_base_delay * (2**attempt)
+                            logger.warning(
+                                "Rate limited on %s (attempt %d/%d), "
+                                "retrying in %.1fs: %s",
+                                self.model_id,
+                                attempt + 1,
+                                self._rate_limit_retries + 1,
+                                delay,
+                                rate_err,
+                            )
+                            time.sleep(delay)
+                        else:
+                            logger.warning(
+                                "Rate limited on %s after %d attempts, giving up: %s",
+                                self.model_id,
+                                self._rate_limit_retries + 1,
+                                rate_err,
+                            )
+
+                if last_exc is not None:
+                    yield [ScoredOutput(score=0.0, output="LLM inference failed")]
+                    continue
 
                 yield self._parse_response(response)
 
@@ -288,7 +349,6 @@ class LiteLLMLanguageModel(BaseLanguageModel):
                 LiteLLMConnectionError,
                 LiteLLMNotFoundError,
                 LiteLLMPermissionDeniedError,
-                LiteLLMRateLimitError,
                 LiteLLMTimeout,
             ) as e:
                 logger.warning(
@@ -349,11 +409,47 @@ class LiteLLMLanguageModel(BaseLanguageModel):
                     )
                     messages = [{"role": "user", "content": prompt}]
 
-                    response = await litellm.acompletion(
-                        model=self.model_id,
-                        messages=messages,
-                        **call_kwargs,
-                    )
+                    # ── Rate-limit retry with exponential back-off ──
+                    last_exc: Exception | None = None
+                    for attempt in range(self._rate_limit_retries + 1):
+                        try:
+                            response = await litellm.acompletion(
+                                model=self.model_id,
+                                messages=messages,
+                                **call_kwargs,
+                            )
+                            last_exc = None
+                            break
+                        except LiteLLMRateLimitError as rate_err:
+                            last_exc = rate_err
+                            if attempt < self._rate_limit_retries:
+                                delay = self._rate_limit_base_delay * (2**attempt)
+                                logger.warning(
+                                    "Rate limited on %s (attempt %d/%d), "
+                                    "retrying in %.1fs: %s",
+                                    self.model_id,
+                                    attempt + 1,
+                                    self._rate_limit_retries + 1,
+                                    delay,
+                                    rate_err,
+                                )
+                                await asyncio.sleep(delay)
+                            else:
+                                logger.warning(
+                                    "Rate limited on %s after %d attempts, "
+                                    "giving up: %s",
+                                    self.model_id,
+                                    self._rate_limit_retries + 1,
+                                    rate_err,
+                                )
+
+                    if last_exc is not None:
+                        return [
+                            ScoredOutput(
+                                score=0.0,
+                                output="LLM inference failed",
+                            )
+                        ]
 
                     return self._parse_response(response)
 
@@ -364,7 +460,6 @@ class LiteLLMLanguageModel(BaseLanguageModel):
                     LiteLLMConnectionError,
                     LiteLLMNotFoundError,
                     LiteLLMPermissionDeniedError,
-                    LiteLLMRateLimitError,
                     LiteLLMTimeout,
                 ) as e:
                     logger.warning(

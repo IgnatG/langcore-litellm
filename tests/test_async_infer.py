@@ -18,6 +18,7 @@ from langcore_litellm.provider import LiteLLMLanguageModel
 
 
 def _make_provider(**kwargs):
+    kwargs.setdefault("rate_limit_retries", 0)
     return LiteLLMLanguageModel(model_id="litellm/gpt-4o", **kwargs)
 
 
@@ -246,3 +247,122 @@ class TestKnownErrorHandling:
 
         warning_records = [r for r in caplog.records if r.levelno == logging.WARNING]
         assert any(cls_name in r.message for r in warning_records)
+
+
+class TestRateLimitRetry:
+    """Rate-limit retry with exponential back-off."""
+
+    @pytest.mark.asyncio
+    async def test_async_retries_on_rate_limit(self):
+        """async_infer retries on RateLimitError and succeeds."""
+        from litellm.exceptions import RateLimitError as LiteLLMRateLimitError
+
+        provider = _make_provider(rate_limit_retries=2, rate_limit_base_delay=0.01)
+        exc = LiteLLMRateLimitError(
+            message="rate limited",
+            model="mistral/mistral-large-latest",
+            llm_provider="mistral",
+        )
+        good_resp = _mock_response("ok")
+
+        call_count = 0
+
+        async def _side_effect(**kwargs):
+            nonlocal call_count
+            call_count += 1
+            if call_count <= 1:
+                raise exc
+            return good_resp
+
+        with mock.patch("litellm.acompletion", new_callable=mock.AsyncMock) as m:
+            m.side_effect = _side_effect
+            results = await provider.async_infer(["p1"])
+
+        assert results[0][0].score == 1.0
+        assert results[0][0].output == "ok"
+        assert call_count == 2  # 1 fail + 1 success
+
+    @pytest.mark.asyncio
+    async def test_async_exhausts_retries(self):
+        """async_infer gives up after all retries are exhausted."""
+        from litellm.exceptions import RateLimitError as LiteLLMRateLimitError
+
+        provider = _make_provider(rate_limit_retries=2, rate_limit_base_delay=0.01)
+        exc = LiteLLMRateLimitError(
+            message="rate limited",
+            model="mistral/mistral-large-latest",
+            llm_provider="mistral",
+        )
+
+        with mock.patch("litellm.acompletion", new_callable=mock.AsyncMock) as m:
+            m.side_effect = exc
+            results = await provider.async_infer(["p1"])
+
+        assert results[0][0].score == 0.0
+        assert results[0][0].output == "LLM inference failed"
+        assert m.await_count == 3  # 1 initial + 2 retries
+
+    def test_sync_retries_on_rate_limit(self):
+        """Sync infer retries on RateLimitError and succeeds."""
+        from litellm.exceptions import RateLimitError as LiteLLMRateLimitError
+
+        provider = _make_provider(rate_limit_retries=2, rate_limit_base_delay=0.01)
+        exc = LiteLLMRateLimitError(
+            message="rate limited",
+            model="mistral/mistral-large-latest",
+            llm_provider="mistral",
+        )
+        good_resp = _mock_response("ok")
+
+        call_count = 0
+
+        def _side_effect(**kwargs):
+            nonlocal call_count
+            call_count += 1
+            if call_count <= 1:
+                raise exc
+            return good_resp
+
+        with mock.patch("litellm.completion") as m:
+            m.side_effect = _side_effect
+            results = list(provider.infer(["p1"]))
+
+        assert results[0][0].score == 1.0
+        assert results[0][0].output == "ok"
+        assert call_count == 2
+
+    def test_sync_exhausts_retries(self):
+        """Sync infer gives up after all retries exhausted."""
+        from litellm.exceptions import RateLimitError as LiteLLMRateLimitError
+
+        provider = _make_provider(rate_limit_retries=2, rate_limit_base_delay=0.01)
+        exc = LiteLLMRateLimitError(
+            message="rate limited",
+            model="mistral/mistral-large-latest",
+            llm_provider="mistral",
+        )
+
+        with mock.patch("litellm.completion") as m:
+            m.side_effect = exc
+            results = list(provider.infer(["p1"]))
+
+        assert results[0][0].score == 0.0
+        assert results[0][0].output == "LLM inference failed"
+        assert m.call_count == 3  # 1 initial + 2 retries
+
+    def test_rate_limit_retries_stored_on_instance(self):
+        """rate_limit_retries and rate_limit_base_delay are stored, not forwarded."""
+        provider = _make_provider(
+            rate_limit_retries=5,
+            rate_limit_base_delay=3.0,
+        )
+        assert provider._rate_limit_retries == 5
+        assert provider._rate_limit_base_delay == 3.0
+        assert "rate_limit_retries" not in provider.provider_kwargs
+        assert "rate_limit_base_delay" not in provider.provider_kwargs
+
+    def test_default_retry_params(self):
+        """Default retry parameters match module constants."""
+        provider = LiteLLMLanguageModel(model_id="litellm/gpt-4o")
+        assert provider._rate_limit_retries == 4
+        assert provider._rate_limit_base_delay == 2.0

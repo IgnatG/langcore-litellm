@@ -21,6 +21,7 @@ from langcore_litellm.provider import LiteLLMLanguageModel
 
 def _make_provider(**kwargs):
     """Create a provider instance with sensible defaults."""
+    kwargs.setdefault("rate_limit_retries", 0)
     return LiteLLMLanguageModel(model_id="litellm/gpt-4o", **kwargs)
 
 
