@@ -208,9 +208,9 @@ class TestKnownErrorHandling:
 
         # Should log a WARNING, not an ERROR with traceback
         warning_records = [r for r in caplog.records if r.levelno == logging.WARNING]
-        assert any(
-            cls_name in r.message for r in warning_records
-        ), f"Expected a WARNING log mentioning {cls_name}, got: {[r.message for r in caplog.records]}"
+        assert any(cls_name in r.message for r in warning_records), (
+            f"Expected a WARNING log mentioning {cls_name}, got: {[r.message for r in caplog.records]}"
+        )
 
     @pytest.mark.parametrize(
         "exc_path",
