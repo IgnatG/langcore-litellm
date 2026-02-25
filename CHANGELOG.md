@@ -2,6 +2,19 @@
 
 <!-- version list -->
 
+## v1.0.4 (2026-02-25)
+
+### Bug Fixes
+
+- Update litellm dependency to version 1.81.15 in project files
+  ([`38bf594`](https://github.com/IgnatG/langcore-litellm/commit/38bf59448d6781e7eabe00aa5be1c6d970c82d54))
+
+### Chores
+
+- Update version to 1.0.3 and enhance changelog with new error handling
+  ([`adef5f4`](https://github.com/IgnatG/langcore-litellm/commit/adef5f470a261f4f4163f598c7176a100c06229d))
+
+
 ## v1.0.3 (2026-02-25)
 
 ### Bug Fixes
