@@ -2,6 +2,14 @@
 
 <!-- version list -->
 
+## v1.1.2 (2026-02-25)
+
+### Bug Fixes
+
+- Bump version to 1.0.5 in pyproject.toml and uv.lock
+  ([`d3f9994`](https://github.com/IgnatG/langcore-litellm/commit/d3f999424faf3128b3ba325c1b1256520480756e))
+
+
 ## v1.1.1 (2026-02-25)
 
 ### Bug Fixes
