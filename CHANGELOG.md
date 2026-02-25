@@ -2,6 +2,14 @@
 
 <!-- version list -->
 
+## v1.1.0 (2026-02-25)
+
+### Features
+
+- Implement rate-limit retry with exponential back-off for LiteLLM API calls
+  ([`1dcd8da`](https://github.com/IgnatG/langcore-litellm/commit/1dcd8da0d5ca9d70da2a8bd34c85bf1abc0466fa))
+
+
 ## v1.0.5 (2026-02-26)
 
 ### Features
