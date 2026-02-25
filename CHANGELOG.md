@@ -2,6 +2,14 @@
 
 <!-- version list -->
 
+## v1.1.1 (2026-02-25)
+
+### Bug Fixes
+
+- Updated the dependencies
+  ([`46e6f99`](https://github.com/IgnatG/langcore-litellm/commit/46e6f999597ae45de8298e1a812b0059588afab1))
+
+
 ## v1.1.0 (2026-02-25)
 
 ### Features
